@@ -1,13 +1,12 @@
 import itertools
-from configparser import ConfigParser
+import os
 from datetime import datetime, timezone, timedelta
-from pprint import pprint
 
+import logging
 import osuapi
 import pymongo
 
-config = ConfigParser()
-config.read('config.ini')
+logger = logging.getLogger(__name__)
 
 
 def simplify(s):
@@ -16,26 +15,32 @@ def simplify(s):
 
 class Backend:
     def __init__(self, loop):
-        self.api = osuapi.OsuApi(config['osuapi']['key'],
+        logger.info('Initialising osuapi driver')
+        self.api = osuapi.OsuApi(os.environ.get('osuapi'),
                                  connector=osuapi.AHConnector(loop=loop))
-        client = pymongo.MongoClient('mongodb://localhost:27017/')
-        self.db = client.data
+        logger.info('Initialising mongodb driver')
+        client = pymongo.MongoClient(os.environ.get('MONGODB_URI'))
+        self.db = client.get_database()
 
     def clean_db(self):
         for c in self.db.collection_names():
             self.db.drop_collection(c)
 
     def init_db(self):
+        logger.info('Initialising db indices')
         self.db.subs.create_index([('attr', pymongo.HASHED)])
         self.db.subs.create_index([('value', pymongo.HASHED)])
         self.db.links.create_index([('user', pymongo.HASHED)])
         self.db.links.create_index([('sub', pymongo.HASHED)])
         self.db.links.create_index([('added', pymongo.ASCENDING)])
-        self.db.last_check.insert_one({'time': datetime.now(tz=timezone(timedelta(hours=8)))})
+        time = datetime.now(tz=timezone(timedelta(hours=8)))
+        logger.info(f'Setting last_check at {time}')
+        self.db.last_check.insert_one({'time': time})
 
     def set_last_check(self, days_ago):
-        doc = {'time': datetime.now(tz=timezone(timedelta(hours=8))) - timedelta(days=days_ago)}
-        self.db.last_check.find_one_and_update({}, {'$set': doc})
+        time = datetime.now(tz=timezone(timedelta(hours=8))) - timedelta(days=days_ago)
+        logger.info(f'Changing last_check to {time}')
+        self.db.last_check.find_one_and_update({}, {'$set': {'time': time}})
 
     def add(self, user, attr, value):
         user_id = self.find_or_add('users', {'_id': user})
@@ -46,8 +51,10 @@ class Backend:
     def find_or_add(self, collection, doc):
         existing = self.db[collection].find_one(doc)
         if existing is None:
+            logger.info(f'Adding {doc} to {collection}')
             return self.db[collection].insert_one(doc).inserted_id
         else:
+            logger.info(f'Found existing {doc} in {collection}')
             return existing['_id']
 
     def list(self, user):
@@ -61,17 +68,20 @@ class Backend:
                                                    sort=[('added', pymongo.ASCENDING)],
                                                    skip=ix)['sub']
         sub = self.db.subs.find_one({'_id': sub_id})
+        logger.info(f"Removed {user}'s subscription to {sub}")
         return sub
 
     def remove_all(self, user):
+        logger.info(f'Removing {user} and all their subs')
         self.db.links.delete_many({'user': user})
         self.db.users.delete_one({'_id': user})
 
     async def check(self, notify_cb):
-        doc = {'time': datetime.now(tz=timezone(timedelta(hours=8)))}
-        last_check = self.db.last_check.find_one_and_update({}, {'$set': doc})['time']
+        time = datetime.now(tz=timezone(timedelta(hours=8)))
+        last_check = self.db.last_check.find_one_and_update({}, {'$set': {'time': time}})['time']
+        logger.info(f'Changed last_check from {time} to {last_check}')
         beatmaps = await self.api.get_beatmaps(since=last_check)
-        pprint([b.artist for b in beatmaps])
+        logger.info(f'Got {len(beatmaps)} new beatmaps')
         groups = itertools.groupby(beatmaps, lambda r: r.beatmapset_id)
         to_notify = []
         to_notify_append = to_notify.append

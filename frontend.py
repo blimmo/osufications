@@ -3,6 +3,7 @@ import traceback
 from configparser import ConfigParser
 
 import discord
+import logging
 from discord.ext import commands
 from osuapi.enums import BeatmapStatus
 
@@ -19,6 +20,8 @@ icon_urls = {BeatmapStatus.ranked: 'http://i.imgur.com/5r5hs7L.png',
 osu_pink = 0xff67aa
 
 listfmt = '{0}: {attr} "{value}"'
+
+logger = logging.getLogger(__name__)
 
 conf = ConfigParser()
 conf.read('msgs.ini')
@@ -37,6 +40,7 @@ class Subscriptions:
     async def sub(self, ctx, attribute: str, value: str):
         """Add a subscription
         Where attribute is the thing you want to check and value what you want to check it for"""
+        logger.info(f'Adding subscription to {attribute}={value} for {ctx.message.author.name}({ctx.message.author.id})')
         try:
             self.backend.add(ctx.message.author.id, attribute, value)
         except ValueError as e:
@@ -47,6 +51,7 @@ class Subscriptions:
     @commands.command(name='list', pass_context=True)
     async def list_subs(self, ctx):
         """Lists the subscriptions you have associated with your account"""
+        logger.info('Listing subs for {ctx.message.author.name}({ctx.message.author.id})')
         substrs = (listfmt.format(i, **doc)
                    for i, doc in enumerate(self.backend.list(ctx.message.author.id)))
         msg = '\n'.join(substrs)
@@ -58,12 +63,14 @@ class Subscriptions:
     async def remove(self, ctx, index: int):
         """Removes a subscription
         Where index is the number that appeared before it in list"""
+        logger.info('Removing subscription at index {index} for {ctx.message.author.name}({ctx.message.author.id})')
         removed = self.backend.remove(ctx.message.author.id, index)
         await self.bot.say(msgs['removed'].format(**removed))
 
     @commands.command(pass_context=True)
     async def remove_all(self, ctx):
         """Removes all your subscriptions and removes your account from the database"""
+        logger.info('Removing all subs for {ctx.message.author.name}({ctx.message.author.id})')
         self.backend.remove_all(ctx.message.author.id)
 
     @commands.command()
@@ -73,11 +80,17 @@ class Subscriptions:
         Has a cooldown of 1 minute
         You shouldn't need to use this as it's called automatically"""
         await self.bot.type()
+        await self.real_check()
+
+    async def real_check(self):
+        logger.info('Checking')
         await self.backend.check(self.notify)
 
     async def notify(self, user_id, beatmaps, sub=None):
         """Sends the user with user_id a notification about the beatmapset beatmaps caused by their subscription sub"""
+        user = await self.bot.get_user_info(user_id)
         beatmap = beatmaps[0]
+        logger.info(f'Notifying {user.name}({user.id}) about {urlfmt.format(beatmap)}')
         beatmaps = sorted(beatmaps, key=lambda b: b.difficultyrating)
         embed = discord.Embed(title=notif['title'].format(beatmap),
                               url=urlfmt.format(beatmap),
@@ -94,7 +107,7 @@ class Subscriptions:
                         inline=True)
         embed.set_footer(text=notif['footer'].format(**sub),
                          icon_url='https://w.ppy.sh/c/c9/Logo.png')
-        await self.bot.send_message(await self.bot.get_user_info(user_id), embed=embed)
+        await self.bot.send_message(user, embed=embed)
 
 
 class Admin:

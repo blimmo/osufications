@@ -1,34 +1,36 @@
 import logging
-import sys
-import traceback
-from configparser import ConfigParser
+import os
 
 from discord.ext import commands
 
 import frontend
 from backend import Backend
 
-config = ConfigParser()
-config.read('config.ini')
-
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=getattr(logging, os.environ.get('loglevel', 'INFO'), logging.INFO))
+logger = logging.getLogger(__name__)
 
 
 def main():
     bot = commands.Bot(command_prefix='')
+    logger.info('Initialising backend')
     backend = Backend(bot.loop)
+    logger.info('Adding commands')
     frontend.setup(bot, backend)
 
     @bot.event
     async def on_ready():
-        print('Logged in')
+        logger.info('Logged in, running check')
+        await bot.get_cog('Subscriptions').real_check()
 
     @bot.event
     async def on_message(message):
         # PMs only
+        # todo: check for self message
         if message.channel.is_private:
-            # Handle commands
+            logger.info(f"Handling commands in {message.author.name}({message.author.id})'s message: {message.content}")
             await bot.process_commands(message)
+        else:
+            logger.info(f"Ignoring message: {message.content} because it wasn't in a dm")
 
     @bot.event
     async def on_command_error(exception, context):
@@ -39,11 +41,11 @@ def main():
         elif isinstance(exception, commands.CommandOnCooldown):
             await bot.send_message(context.message.channel, str(exception))
         else:
-            print('Ignoring exception in command {}'.format(context.command), file=sys.stderr)
-            traceback.print_exception(type(exception), exception, exception.__traceback__, file=sys.stderr)
+            logger.error(f'Ignoring exception in command {context.command}', exc_info=(type(exception), exception, exception.__traceback__))
 
+    logger.info('Starting bot')
     try:
-        bot.run(config['discord']['token'])
+        bot.run(os.environ.get('discord'))
     finally:
         bot.logout()
 

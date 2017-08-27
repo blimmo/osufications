@@ -1,12 +1,15 @@
-from configparser import ConfigParser
-
+import logging
 from discord.ext import commands
 
-config = ConfigParser()
-config.read('config.ini')
+logger = logging.getLogger(__name__)
 
 
 def is_owner():
     def f(ctx):
-        return ctx.message.author.id == config['ids']['owner']
+        if ctx.message.author.id == '132184348639100929':
+            logger.info(f'Running admin command from {ctx.message.author.name}({ctx.message.author.id})')
+            return True
+        else:
+            logger.info(f'Not running admin command from {ctx.message.author.name}({ctx.message.author.id})')
+            return False
     return commands.check(f)
