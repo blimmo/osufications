@@ -1,3 +1,4 @@
+import logging
 import sys
 import traceback
 from configparser import ConfigParser
@@ -9,6 +10,9 @@ from backend import Backend
 
 config = ConfigParser()
 config.read('config.ini')
+
+logging.basicConfig(level=logging.DEBUG)
+
 
 def main():
     bot = commands.Bot(command_prefix='')

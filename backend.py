@@ -20,23 +20,28 @@ class Backend:
                                  connector=osuapi.AHConnector(loop=loop))
         client = pymongo.MongoClient('mongodb://localhost:27017/')
         self.db = client.data
-        self.init_db()
 
-    def init_db(self):
+    def clean_db(self):
         for c in self.db.collection_names():
             self.db.drop_collection(c)
+
+    def init_db(self):
         self.db.subs.create_index([('attr', pymongo.HASHED)])
         self.db.subs.create_index([('value', pymongo.HASHED)])
         self.db.links.create_index([('user', pymongo.HASHED)])
         self.db.links.create_index([('sub', pymongo.HASHED)])
         self.db.links.create_index([('added', pymongo.ASCENDING)])
-        self.db.last_check.insert_one({'time': datetime.now(tz=timezone(timedelta(hours=8))) - timedelta(days=4)})
+        self.db.last_check.insert_one({'time': datetime.now(tz=timezone(timedelta(hours=8)))})
+
+    def set_last_check(self, days_ago):
+        doc = {'time': datetime.now(tz=timezone(timedelta(hours=8))) - timedelta(days=days_ago)}
+        self.db.last_check.find_one_and_update({}, {'$set': doc})
 
     def add(self, user, attr, value):
         user_id = self.find_or_add('users', {'_id': user})
         sub_id = self.find_or_add('subs', {'attr': attr, 'value': value})
-        link_id = self.find_or_add('links', {'user': user_id, 'sub': sub_id,
-                                             'added': datetime.utcnow()})
+        self.find_or_add('links', {'user': user_id, 'sub': sub_id,
+                                   'added': datetime.utcnow()})
 
     def find_or_add(self, collection, doc):
         existing = self.db[collection].find_one(doc)
@@ -63,10 +68,8 @@ class Backend:
         self.db.users.delete_one({'_id': user})
 
     async def check(self, notify_cb):
-        last_check = self.db.last_check.find_one_and_update({},
-                                                            {'$set': {'time': datetime.now(
-                                                                tz=timezone(timedelta(hours=8)))}})['time']
-        print(last_check)
+        doc = {'time': datetime.now(tz=timezone(timedelta(hours=8)))}
+        last_check = self.db.last_check.find_one_and_update({}, {'$set': doc})['time']
         beatmaps = await self.api.get_beatmaps(since=last_check)
         pprint([b.artist for b in beatmaps])
         groups = itertools.groupby(beatmaps, lambda r: r.beatmapset_id)
