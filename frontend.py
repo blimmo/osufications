@@ -51,7 +51,7 @@ class Subscriptions:
     @commands.command(name='list', pass_context=True)
     async def list_subs(self, ctx):
         """Lists the subscriptions you have associated with your account"""
-        logger.info('Listing subs for {ctx.message.author.name}({ctx.message.author.id})')
+        logger.info(f'Listing subs for {ctx.message.author.name}({ctx.message.author.id})')
         substrs = (listfmt.format(i, **doc)
                    for i, doc in enumerate(self.backend.list(ctx.message.author.id)))
         msg = '\n'.join(substrs)
@@ -63,14 +63,14 @@ class Subscriptions:
     async def remove(self, ctx, index: int):
         """Removes a subscription
         Where index is the number that appeared before it in list"""
-        logger.info('Removing subscription at index {index} for {ctx.message.author.name}({ctx.message.author.id})')
+        logger.info(f'Removing subscription at index {index} for {ctx.message.author.name}({ctx.message.author.id})')
         removed = self.backend.remove(ctx.message.author.id, index)
         await self.bot.say(msgs['removed'].format(**removed))
 
     @commands.command(pass_context=True)
     async def remove_all(self, ctx):
         """Removes all your subscriptions and removes your account from the database"""
-        logger.info('Removing all subs for {ctx.message.author.name}({ctx.message.author.id})')
+        logger.info(f'Removing all subs for {ctx.message.author.name}({ctx.message.author.id})')
         self.backend.remove_all(ctx.message.author.id)
 
     @commands.command()
@@ -119,12 +119,7 @@ class Admin:
 
     @commands.command(hidden=True)
     @checks.is_owner()
-    async def start_msg(self, user: str):
-        await self.bot.send_message(await self.bot.get_user_info(user), msgs['start'])
-
-    @commands.command(pass_context=True, hidden=True)
-    @checks.is_owner()
-    async def eval(self, ctx, *, code: str):
+    async def eval(self, *, code: str):
         """Evaluates code."""
         code = code.strip('` ')
         python = '```py\n{}\n```'

@@ -28,12 +28,10 @@ class Backend:
 
     def init_db(self):
         logger.info('Initialising db indices')
-        self.db.subs.create_index([('attr', pymongo.HASHED)])
-        self.db.subs.create_index([('value', pymongo.HASHED)])
-        self.db.links.create_index([('user', pymongo.HASHED)])
-        self.db.links.create_index([('sub', pymongo.HASHED)])
-        self.db.links.create_index([('added', pymongo.ASCENDING)])
-        time = datetime.now(tz=timezone(timedelta(hours=8)))
+        self.db.subs.create_index([('attr', pymongo.ASCENDING), ('value', pymongo.ASCENDING)])
+        self.db.links.create_index([('user', pymongo.ASCENDING), ('added', pymongo.ASCENDING)])
+        self.db.links.create_index('sub')
+        time = datetime.utcnow()
         logger.info(f'Setting last_check at {time}')
         self.db.last_check.insert_one({'time': time})
 
@@ -45,29 +43,29 @@ class Backend:
     def add(self, user, attr, value):
         user_id = self.find_or_add('users', {'_id': user})
         sub_id = self.find_or_add('subs', {'attr': attr, 'value': value})
-        self.find_or_add('links', {'user': user_id, 'sub': sub_id,
-                                   'added': datetime.utcnow()})
+        self.find_or_add('links', {'user': user_id, 'sub': sub_id},
+                         {'user': user_id, 'sub': sub_id, 'added': datetime.utcnow()})
 
-    def find_or_add(self, collection, doc):
-        existing = self.db[collection].find_one(doc)
-        if existing is None:
-            logger.info(f'Adding {doc} to {collection}')
-            return self.db[collection].insert_one(doc).inserted_id
-        else:
-            logger.info(f'Found existing {doc} in {collection}')
-            return existing['_id']
+    def find_or_add(self, collection, find, update=None):
+        if update is None:
+            update = find
+        existing = self.db[collection].find_one_and_update(find, {'$setOnInsert': update}, upsert=True,
+                                                           return_document=pymongo.ReturnDocument.AFTER)
+        return existing['_id']
 
     def list(self, user):
         sub_ids = [doc['sub'] for doc in self.db.links.find({'user': user},
-                                                            projection=['sub']).sort('added')]
-        return self.db.subs.find({'_id': {'$in': sub_ids}})
+                                                            projection=['sub'],
+                                                            sort=[('added', pymongo.ASCENDING)])]
+        return sorted(self.db.subs.find({'_id': {'$in': sub_ids}}), key=lambda x: sub_ids.index(x['_id']))
 
     def remove(self, user, ix):
-        sub_id = self.db.links.find_one_and_delete({'user': user},
-                                                   projection=['sub'],
-                                                   sort=[('added', pymongo.ASCENDING)],
-                                                   skip=ix)['sub']
-        sub = self.db.subs.find_one({'_id': sub_id})
+        doc = self.db.links.find_one({'user': user},
+                                     projection=['sub'],
+                                     sort=[('added', pymongo.ASCENDING)],
+                                     skip=ix)
+        self.db.links.delete_one({'_id': doc['_id']})
+        sub = self.db.subs.find_one({'_id': doc['sub']})
         logger.info(f"Removed {user}'s subscription to {sub}")
         return sub
 
@@ -77,9 +75,11 @@ class Backend:
         self.db.users.delete_one({'_id': user})
 
     async def check(self, notify_cb):
-        time = datetime.now(tz=timezone(timedelta(hours=8)))
+        time = datetime.utcnow()
         last_check = self.db.last_check.find_one_and_update({}, {'$set': {'time': time}})['time']
-        logger.info(f'Changed last_check from {time} to {last_check}')
+        logger.info(f'Changed last_check from {last_check} to {time}')
+        last_check = last_check.astimezone(timezone(timedelta(hours=8)))
+        logger.info(f'Querying osuapi with since={last_check}')
         beatmaps = await self.api.get_beatmaps(since=last_check)
         logger.info(f'Got {len(beatmaps)} new beatmaps')
         groups = itertools.groupby(beatmaps, lambda r: r.beatmapset_id)

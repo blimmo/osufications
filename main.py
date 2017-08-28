@@ -1,5 +1,6 @@
 import logging
 import os
+from configparser import ConfigParser
 
 from discord.ext import commands
 
@@ -8,6 +9,10 @@ from backend import Backend
 
 logging.basicConfig(level=getattr(logging, os.environ.get('loglevel', 'INFO'), logging.INFO))
 logger = logging.getLogger(__name__)
+
+conf = ConfigParser()
+conf.read('msgs.ini')
+msgs = conf['messages']
 
 
 def main():
@@ -19,18 +24,18 @@ def main():
 
     @bot.event
     async def on_ready():
-        logger.info('Logged in, running check')
+        logger.info('Logged in, starting initial check')
         await bot.get_cog('Subscriptions').real_check()
 
     @bot.event
     async def on_message(message):
-        # PMs only
-        # todo: check for self message
-        if message.channel.is_private:
+        if not message.channel.is_private:
+            logger.info(f"Ignoring message: {message.content} because it wasn't in a dm")
+        elif message.author == bot.user:
+            logger.info(f"Ignoring own message: {message.content}")
+        else:
             logger.info(f"Handling commands in {message.author.name}({message.author.id})'s message: {message.content}")
             await bot.process_commands(message)
-        else:
-            logger.info(f"Ignoring message: {message.content} because it wasn't in a dm")
 
     @bot.event
     async def on_command_error(exception, context):
@@ -43,11 +48,15 @@ def main():
         else:
             logger.error(f'Ignoring exception in command {context.command}', exc_info=(type(exception), exception, exception.__traceback__))
 
+    @bot.event
+    async def on_member_join(member):
+        if member.server.id == '351839594041442314':
+            logger.info(f'{member.name}({member.id}) joined the server sending initial messages')
+            await bot.send_message(member, msgs['start'])
+            await bot.pin_message(await bot.send_message(member, msgs['pin'].format(os.environ.get('url'))))
+
     logger.info('Starting bot')
-    try:
-        bot.run(os.environ.get('discord'))
-    finally:
-        bot.logout()
+    bot.run(os.environ.get('discord'))
 
 if __name__ == '__main__':
     main()
